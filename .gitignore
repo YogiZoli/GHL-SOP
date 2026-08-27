@@ -1,0 +1,8 @@
+# Never commit secrets
+*.env
+.env*
+*token*
+*cookie*
+*secret*
+*credentials*
+claude_desktop_config.json
