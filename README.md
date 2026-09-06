@@ -58,8 +58,55 @@ LocationIds are identifiers, not secrets, so they are safe to keep here. The mat
 | VoxFlow Template | `LrxjlXlvBfLEHegATqgF` | Template source for new locations |
 | VJHOF | `VjHoFGh7RBXtNeb276c7` | Client subaccount |
 | Agency / Company | `Pc233IVytzQRoBSZ0JgX` | Agency-level (company id) |
+| YT2C2C | `em19nP6nAqQD6gDdDDJ9` | PDT lead destination. NO TOKEN YET, see below |
+| ClickClient GHL Test | `pPfkTp3chEgkdiUYO911` | Test subaccount. No token, not needed |
 
 To add a subaccount to the MCP: create a Private Integration Token in that subaccount, add a `GHL_<NAME>_API_KEY` and `GHL_<NAME>_LOCATION_ID` pair to the `gohighlevel` env block in `claude_desktop_config.json`, and restart the Claude desktop app.
+
+## Multi-account: how it really works, verified 2026-09-06
+
+A Private Integration Token is created inside one subaccount and can only ever
+read that subaccount. There is no token that opens all of them, and the
+agency-level token does not open any of them: it covers company endpoints only.
+So multi-account is a token problem, not a server problem, and no change of MCP
+server or CLI can fix a missing token.
+
+Three things follow, and all three cost a session when they are forgotten.
+
+1. **`switch_location` alone does not switch the credential.** It sets the
+   active locationId. The token comes from the map built at startup. Calling it
+   for a subaccount with no token pair succeeds, and every call after it returns
+   403 with "The token does not have access to this location", which reads like
+   a permission problem and is actually a missing line in the config.
+2. **The server reads its environment only at startup.** A pair added to
+   `claude_desktop_config.json` does nothing until Claude Desktop is fully
+   quit and started again. Not a new conversation, not a reconnect: a restart.
+3. **The CLI has the same shape.** `--location-id` selects the target, the
+   Windows env var `GHL_API_KEY` selects the credential, and they are
+   independent. Pointing the CLI at a subaccount whose token is not loaded
+   gives the identical 403. `--experimental` does not change this.
+
+Measured on 2026-09-06, same call against three subaccounts: VoxFlow 200,
+VJHOF 200 (it had been 403 before the token map landed and the app was
+restarted), YT2C2C 403 because no `GHL_YT2C2C_API_KEY` exists anywhere on the
+machine. That last one is not a fault to debug. It is a token that has never
+been created.
+
+### Adding a subaccount, the whole procedure
+
+1. In GoHighLevel, switch to the subaccount. Settings, Private Integrations,
+   Create new integration. Give it the read scopes the work needs, at minimum
+   workflows and contacts readonly. The `pit-` value is shown exactly once.
+2. Put it in the `gohighlevel` env block of `claude_desktop_config.json` as the
+   pair `GHL_<NAME>_API_KEY` and `GHL_<NAME>_LOCATION_ID`.
+3. Quit Claude Desktop completely and start it again.
+4. Verify: ask Claude for the workflows of that locationId. A 200 with an empty
+   list is a pass. A 403 means step 3 was skipped or the token was made in the
+   wrong subaccount.
+
+Only step 1 needs a human. Nothing in the HighLevel API can mint a Private
+Integration Token, so no Claude session can do it, and any session that says it
+will is wrong.
 
 ## Secrets policy
 
@@ -81,4 +128,12 @@ Expect a JSON object with `"name": "VoxFlow"`.
 
 ## Change log
 
+- 2026-09-06: Corrected the multi-account section. The earlier text said the
+  MCP is multi-account without saying that each subaccount needs its own token
+  and that the app must be restarted, which sent three PDT sessions in a row
+  chasing a 403 that was a missing config line. Added the YT2C2C and
+  ClickClient rows and the full add-a-subaccount procedure. Confirmed the token
+  map in `dist/clients/ghl-api-client.js` reads every
+  `GHL_<NAME>_API_KEY` / `GHL_<NAME>_LOCATION_ID` pair, so nothing needs
+  patching; VJHOF now answers 200.
 - 2026-08-27: Repo created. Documented three channels, confirmed the local GoHighLevel-MCP works and switches subaccounts live (VoxFlow to VJHOF and back). Decided against the hosted OAuth MCP.
